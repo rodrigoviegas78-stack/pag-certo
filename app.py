@@ -1,3 +1,4 @@
+# FORCAR LIMPEZA DE CACHE - TENTATIVA FINAL
 import streamlit as st
 from PIL import Image, ImageOps, ImageEnhance
 import easyocr
@@ -228,3 +229,4 @@ with aba3:
                 st.rerun()
     else:
         st.info("Seu dossiê está limpo (Nenhum erro salvo ainda).")
+
