@@ -16,16 +16,22 @@ ARQUIVO_ERROS = 'dossie_erros.csv'
 # 2. Cérebro
 @st.cache_resource
 def load_reader():
+    # Carrega o leitor de OCR
     return easyocr.Reader(['pt'], gpu=False)
 
 def processar_imagem(img):
-    # --- CORREÇÃO DE ROTAÇÃO PARA CELULAR ---
-    # Isso obriga a foto a ficar em pé antes de qualquer coisa
-    img = ImageOps.exif_transpose(img)
-    # ----------------------------------------
+    # 1. CORREÇÃO DE ROTAÇÃO (RESOLVE O PROBLEMA DA FOTO DEITADA)
+    img = ImageOps.exif_transpose(img) 
     
+    # 2. FORÇA MÁXIMA NA NITIDEZ (RESOLVE O PROBLEMA DO DESFOQUE/BORRÃO)
+    img = ImageEnhance.Sharpness(img).enhance(2.0)
+    
+    # 3. ESCALA DE CINZA
     img = ImageOps.grayscale(img)
-    img = ImageEnhance.Contrast(img).enhance(1.5)
+    
+    # 4. CONTRASTE AGRESSIVO
+    img = ImageEnhance.Contrast(img).enhance(2.5) 
+    
     return img
 
 def ler_texto_completo(img):
@@ -34,16 +40,20 @@ def ler_texto_completo(img):
 
 def extrair_produtos(lista_texto):
     produtos = []
-    blacklist = ["TOTAL", "SUBTOTAL", "TROCO", "DINHEIRO", "EMISSAO", "CNPJ", "PAGUE", "MENOS", "VALOR", "ITEM", "CREDITO", "DEBITO"]
+    # Blacklist expandida para ignorar linhas de rodapé
+    blacklist = ["TOTAL", "SUBTOTAL", "TROCO", "DINHEIRO", "EMISSAO", "CNPJ", "PAGUE", "MENOS", "VALOR", "ITEM", "CREDITO", "DEBITO", "IMPOSTO", "TRIBUTO"]
     
     for i, linha in enumerate(lista_texto):
         t = str(linha).strip().upper()
+        # Busca por padrões de preço (XX.XX ou XX,XX)
         match = re.search(r'(\d+)\s*[,.]\s*(\d{2})\b', t)
         if match:
             try:
                 val = float(f"{match.group(1)}.{match.group(2)}")
+                # Pega a linha anterior como nome do produto
                 nom = str(lista_texto[i-1]).strip().upper() if i > 0 else "ITEM"
                 nom = re.sub(r'^[^A-Z0-9]+', '', nom)
+                
                 if not any(b in nom for b in blacklist) and val > 0 and len(nom) > 2:
                     produtos.append({"Produto": nom, "Valor": val})
             except: pass
@@ -54,6 +64,8 @@ if 'cesta' not in st.session_state:
     st.session_state.cesta = []
 if 'resultado_auditoria' not in st.session_state:
     st.session_state.resultado_auditoria = None
+if 'erros_para_salvar' not in st.session_state:
+    st.session_state.erros_para_salvar = None
 
 # 4. Interface
 st.title("🛡️ Pag Certo - Sistema de Defesa do Consumidor")
@@ -64,6 +76,7 @@ with st.sidebar:
     if st.button("🗑️ LIMPAR CESTA ATUAL", type="primary"):
         st.session_state.cesta = []
         st.session_state.resultado_auditoria = None
+        st.session_state.erros_para_salvar = None
         st.rerun()
     
     if st.session_state.cesta:
@@ -87,12 +100,15 @@ with aba1:
     st.write("### O que você viu na prateleira?")
     col_cam, col_up = st.columns(2)
     img_gondola = None
+    
+    # Opção Câmera
     with col_cam:
         c = st.camera_input("📸 Câmera")
         if c: 
             img_aberta = Image.open(c)
-            img_gondola = processar_imagem(img_aberta) # Processa imediatamente pra corrigir rotação
+            img_gondola = processar_imagem(img_aberta)
             
+    # Opção Upload
     with col_up:
         u = st.file_uploader("📂 Arquivo", type=["jpg","png"], key="up1")
         if u: 
@@ -100,17 +116,17 @@ with aba1:
             img_gondola = processar_imagem(img_aberta)
 
     if img_gondola:
-        st.image(img_gondola, width=200, caption="Imagem Processada")
+        # Mostra a imagem processada (em pé e nítida)
+        st.image(img_gondola, width=200, caption="Imagem Processada para Leitura")
         if st.button("➕ LER E MEMORIZAR", type="primary"):
             with st.spinner("Lendo..."):
-                # Como a imagem já foi processada no input, passamos direto
                 txt = ler_texto_completo(img_gondola)
                 itens = extrair_produtos(txt)
                 if itens:
                     for item in itens: st.session_state.cesta.append(item)
                     st.success(f"✅ Memorizei {len(itens)} itens!")
                     st.rerun()
-                else: st.warning("Não li nada.")
+                else: st.warning("Não consegui ler nada. Tente melhorar o foco/iluminação.")
 
 # --- ABA 2: CAIXA ---
 with aba2:
@@ -118,17 +134,16 @@ with aba2:
     u_nota = st.file_uploader("📂 Foto da Nota Fiscal", type=["jpg","png"], key="up2")
     
     if u_nota:
-        # Corrige rotação ao carregar para exibição
+        # Processa a imagem da nota (rotação e nitidez) para exibição e leitura
         img_nota_raw = Image.open(u_nota)
         img_nota = processar_imagem(img_nota_raw)
-        st.image(img_nota, caption="Nota Fiscal", width=300)
+        st.image(img_nota, caption="Nota Fiscal Processada", width=300)
         
         if st.button("🚀 AUDITAR AGORA", type="primary"):
             if not st.session_state.cesta:
-                st.error("Cesta vazia! Vá na aba 1.")
+                st.error("Cesta vazia! Vá na aba 1 e capture os preços da gôndola.")
             else:
                 with st.spinner("O Juiz está analisando..."):
-                    # Passa a imagem já corrigida
                     txt = ler_texto_completo(img_nota)
                     itens_nota = extrair_produtos(txt)
                     
@@ -138,7 +153,8 @@ with aba2:
                     for item_cesta in st.session_state.cesta:
                         nome = item_cesta['Produto']
                         esperado = item_cesta['Valor']
-                        matches = get_close_matches(nome, [i['Produto'] for i in itens_nota], n=1, cutoff=0.5)
+                        # Mantendo cutoff em 0.5, mas ideal é 0.7 para maior segurança
+                        matches = get_close_matches(nome, [i['Produto'] for i in itens_nota], n=1, cutoff=0.5) 
                         
                         status = "⚪ Não achado"
                         cobrado = 0.0
@@ -165,6 +181,7 @@ with aba2:
                     
                     st.session_state.resultado_auditoria = pd.DataFrame(relatorio)
                     st.session_state.erros_para_salvar = erros_encontrados
+                    st.rerun() # Força a atualização da interface após a auditoria
 
     # MOSTRAR RESULTADO E SALVAR
     if st.session_state.resultado_auditoria is not None:
@@ -186,6 +203,7 @@ with aba2:
                 df_erros.to_csv(ARQUIVO_ERROS, mode='a', header=header, index=False)
                 st.balloons()
                 st.success("✅ Prova salva no Dossiê! (Veja na Aba 3)")
+                st.session_state.erros_para_salvar = [] # Limpa a memória para evitar salvar duas vezes
         else:
             st.success("Nenhum roubo detectado nesta compra.")
 
