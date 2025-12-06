@@ -1,6 +1,9 @@
 streamlit
-easyocr
 pandas
 pillow
 numpy
 opencv-python-headless
+
+# Versões forçadas para rodar no servidor com pouca RAM
+torch==1.13.1
+easyocr==1.7.0
