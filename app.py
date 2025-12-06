@@ -19,6 +19,11 @@ def load_reader():
     return easyocr.Reader(['pt'], gpu=False)
 
 def processar_imagem(img):
+    # --- CORREÇÃO DE ROTAÇÃO PARA CELULAR ---
+    # Isso obriga a foto a ficar em pé antes de qualquer coisa
+    img = ImageOps.exif_transpose(img)
+    # ----------------------------------------
+    
     img = ImageOps.grayscale(img)
     img = ImageEnhance.Contrast(img).enhance(1.5)
     return img
@@ -84,16 +89,22 @@ with aba1:
     img_gondola = None
     with col_cam:
         c = st.camera_input("📸 Câmera")
-        if c: img_gondola = Image.open(c)
+        if c: 
+            img_aberta = Image.open(c)
+            img_gondola = processar_imagem(img_aberta) # Processa imediatamente pra corrigir rotação
+            
     with col_up:
         u = st.file_uploader("📂 Arquivo", type=["jpg","png"], key="up1")
-        if u: img_gondola = Image.open(u)
+        if u: 
+            img_aberta = Image.open(u)
+            img_gondola = processar_imagem(img_aberta)
 
     if img_gondola:
-        st.image(img_gondola, width=200)
+        st.image(img_gondola, width=200, caption="Imagem Processada")
         if st.button("➕ LER E MEMORIZAR", type="primary"):
             with st.spinner("Lendo..."):
-                txt = ler_texto_completo(processar_imagem(img_gondola))
+                # Como a imagem já foi processada no input, passamos direto
+                txt = ler_texto_completo(img_gondola)
                 itens = extrair_produtos(txt)
                 if itens:
                     for item in itens: st.session_state.cesta.append(item)
@@ -107,14 +118,18 @@ with aba2:
     u_nota = st.file_uploader("📂 Foto da Nota Fiscal", type=["jpg","png"], key="up2")
     
     if u_nota:
-        st.image(Image.open(u_nota), caption="Nota Fiscal", width=300)
+        # Corrige rotação ao carregar para exibição
+        img_nota_raw = Image.open(u_nota)
+        img_nota = processar_imagem(img_nota_raw)
+        st.image(img_nota, caption="Nota Fiscal", width=300)
         
         if st.button("🚀 AUDITAR AGORA", type="primary"):
             if not st.session_state.cesta:
                 st.error("Cesta vazia! Vá na aba 1.")
             else:
                 with st.spinner("O Juiz está analisando..."):
-                    txt = ler_texto_completo(processar_imagem(Image.open(u_nota)))
+                    # Passa a imagem já corrigida
+                    txt = ler_texto_completo(img_nota)
                     itens_nota = extrair_produtos(txt)
                     
                     relatorio = []
@@ -155,7 +170,6 @@ with aba2:
     if st.session_state.resultado_auditoria is not None:
         st.write("### Veredito:")
         
-        # Função de cores
         def pintar(val):
             if 'ROUBO' in str(val): return 'background-color: #ffcccc; color: red; font-weight: bold'
             if 'OK' in str(val): return 'background-color: #ccffcc'
@@ -163,7 +177,6 @@ with aba2:
         
         st.dataframe(st.session_state.resultado_auditoria.style.applymap(pintar, subset=['Status']), use_container_width=True)
         
-        # BOTÃO DE SALVAR PROVAS
         erros = st.session_state.erros_para_salvar
         if erros:
             st.error(f"🚨 Detectamos {len(erros)} cobranças indevidas!")
